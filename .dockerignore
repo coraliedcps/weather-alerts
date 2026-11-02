@@ -1,0 +1,9 @@
+.git
+.env
+config.yaml
+state.json
+last_run
+tests
+tools
+**/__pycache__
+.pytest_cache

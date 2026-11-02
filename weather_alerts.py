@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """weather-alerts : surveille le vent (rafales) et les cyclones autour d'emplacements
-et envoie des notifications push via ntfy. Prévu pour tourner toutes les heures
-(GitHub Actions) ; l'état est gardé dans state.json pour ne pas spammer.
+et envoie des notifications push via ntfy. Tourne en continu (--loop, conteneur Docker
+sur Raspberry Pi) ou une seule fois ; l'état est gardé dans state.json pour ne pas spammer.
 
 Sources (gratuites, sans clé) :
   - Open-Meteo : prévisions horaires de rafales et de vent moyen (en nœuds)
@@ -15,6 +15,7 @@ import json
 import math
 import os
 import re
+import signal
 import sys
 import time
 import unicodedata
@@ -54,6 +55,7 @@ DEFAULTS = {
     "escalade_rafales_kts": 5,     # re-notifier si les rafales gagnent X kts
     "escalade_cyclone_km": 50,     # re-notifier si le cyclone se rapproche de X km
     "pagasa_url": PAGASA_URL,      # page des bulletins cycloniques PAGASA
+    "intervalle_minutes": 60,      # mode --loop : un passage toutes les X minutes
 }
 LOC_DEFAULTS = {"seuil_rafales_kts": 35, "rayon_cyclone_km": 500, "seuil_signal_pagasa": 1}
 
@@ -130,10 +132,15 @@ def load_config(path: Path) -> dict:
     except FileNotFoundError:
         raise SystemExit(f"Config introuvable : {path} (copiez config.example.yaml)")
     cfg = {**DEFAULTS, **raw}
-    topic = os.environ.get("NTFY_TOPIC", "").strip() or str(cfg.get("ntfy_topic") or "").strip()
-    if not topic or topic == "CHANGEZ-MOI":
-        raise SystemExit("ntfy_topic manquant (config.yaml ou secret NTFY_TOPIC)")
+    # variables d'environnement (.env) prioritaires sur le YAML, comme commute-alerts
+    for env, key in (("NTFY_URL", "ntfy_server"), ("NTFY_TOPIC", "ntfy_topic"), ("NTFY_TOKEN", "ntfy_token")):
+        if value := os.environ.get(env, "").strip():
+            cfg[key] = value
+    topic = str(cfg.get("ntfy_topic") or "").strip()
+    if not topic or topic in ("CHANGEZ-MOI", "change-me"):
+        raise SystemExit("ntfy_topic manquant (NTFY_TOPIC dans .env, ou config.yaml)")
     cfg["ntfy_topic"] = topic
+    cfg["ntfy_token"] = str(cfg.get("ntfy_token") or "").strip()
     locs = cfg.get("emplacements") or []
     if not locs:
         raise SystemExit("Aucun emplacement configuré")
@@ -165,14 +172,19 @@ def save_state(path: Path, state: dict) -> None:
 
 # --------------------------------------------------------------------------- notifications
 class Ntfy:
-    def __init__(self, server: str, topic: str):
-        self.server, self.topic = server.rstrip("/"), topic
+    def __init__(self, server: str, topic: str, token: str = ""):
+        self.server, self.topic, self.token = server.rstrip("/"), topic, token
+
+    def headers(self) -> dict[str, str]:
+        h = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
+        if self.token:
+            h["Authorization"] = f"Bearer {self.token}"
+        return h
 
     def send(self, title: str, message: str, priority: int = P_NORMAL, tags: list[str] | None = None) -> None:
         body = json.dumps({"topic": self.topic, "title": full_title(title), "message": message,
                            "priority": priority, "tags": tags or []}).encode("utf-8")
-        req = urllib.request.Request(self.server, data=body, method="POST", headers={
-            "Content-Type": "application/json", "User-Agent": USER_AGENT})
+        req = urllib.request.Request(self.server, data=body, method="POST", headers=self.headers())
         with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
             resp.read()
 
@@ -574,16 +586,59 @@ class Runner:
 
 
 # --------------------------------------------------------------------------- CLI
+def run_once(cfg: dict, state_path: Path, notifier, dry_run: bool) -> int:
+    state = load_state(state_path)
+    code = Runner(cfg, state, notifier, datetime.now(timezone.utc)).run()
+    if not dry_run:
+        save_state(state_path, state)
+    return code
+
+
+def last_run_path(state_path: Path) -> Path:
+    return state_path.with_name("last_run")
+
+
+def healthcheck(state_path: Path, interval_min: int) -> int:
+    """0 si la boucle a terminé un passage récemment (utilisé par le HEALTHCHECK Docker)."""
+    try:
+        age = time.time() - last_run_path(state_path).stat().st_mtime
+    except FileNotFoundError:
+        print("aucun passage terminé")
+        return 1
+    ok = age < interval_min * 60 * 2 + 300
+    print(f"dernier passage il y a {round(age / 60)} min — {'OK' if ok else 'EN RETARD'}")
+    return 0 if ok else 1
+
+
+def loop(cfg: dict, state_path: Path, notifier, dry_run: bool) -> int:
+    interval = int(cfg["intervalle_minutes"]) * 60
+    log(f"démarrage : {len(cfg['emplacements'])} emplacement(s), un passage toutes les {interval // 60} min")
+    while True:
+        started = time.monotonic()
+        try:
+            run_once(cfg, state_path, notifier, dry_run)
+            last_run_path(state_path).touch()
+            log(f"passage terminé ({datetime.now().strftime('%H:%M')})")
+        except Exception as exc:  # une erreur ne doit jamais arrêter la surveillance
+            log(f"passage en échec : {exc!r}")
+        time.sleep(max(30, interval - (time.monotonic() - started)))
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--config", default="config.yaml", type=Path)
-    ap.add_argument("--state", default="state.json", type=Path)
+    data_dir = Path(os.environ.get("DATA_DIR", "."))
+    ap.add_argument("--config", default=os.environ.get("WEATHER_CONFIG", "config.yaml"), type=Path)
+    ap.add_argument("--state", default=data_dir / "state.json", type=Path)
+    ap.add_argument("--loop", action="store_true", help="tourne en continu (un passage toutes les intervalle_minutes)")
+    ap.add_argument("--healthcheck", action="store_true", help="vérifie qu'un passage a eu lieu récemment")
     ap.add_argument("--dry-run", action="store_true", help="affiche les notifications au lieu de les envoyer (état non écrit)")
     ap.add_argument("--test", action="store_true", help="envoie une notification de test et s'arrête")
     ap.add_argument("--pagasa", action="store_true", help="affiche les signaux PAGASA lus et s'arrête (diagnostic)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
+    if args.healthcheck:
+        return healthcheck(args.state, int(cfg["intervalle_minutes"]))
     if args.pagasa:
         signals = fetch_pagasa(cfg["pagasa_url"])
         for level, seg in signals:
@@ -594,15 +649,15 @@ def main(argv: list[str] | None = None) -> int:
                 hit = pagasa_signal_for(signals, loc["province"])
                 print(f"{loc['nom']} ({loc['province']}) : " + (f"signal n° {hit[0]} — {hit[1]}" if hit else "aucun signal"))
         return 0
-    notifier = DryRun() if args.dry_run else Ntfy(cfg["ntfy_server"], cfg["ntfy_topic"])
+    notifier = DryRun() if args.dry_run else Ntfy(cfg["ntfy_server"], cfg["ntfy_topic"], cfg["ntfy_token"])
     if args.test:
         notifier.send("Test", "Si vous lisez ceci, les notifications fonctionnent.", P_NORMAL, ["tada"])
         return 0
-    state = load_state(args.state)
-    code = Runner(cfg, state, notifier, datetime.now(timezone.utc)).run()
-    if not args.dry_run:
-        save_state(args.state, state)
-    return code
+    if args.loop:
+        # arrêt propre sur « docker stop » (SIGTERM)
+        signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+        return loop(cfg, args.state, notifier, args.dry_run)
+    return run_once(cfg, args.state, notifier, args.dry_run)
 
 
 if __name__ == "__main__":

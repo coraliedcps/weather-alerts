@@ -179,3 +179,23 @@ def test_pagasa_alert_lifecycle():
     assert len(run_pagasa(st, [(3, "Negros Oriental")])) == 1     # remonte : notifié
     s = run_pagasa(st, [(1, "Cebu")])
     assert "Fin de signal" in s[0][0] and not st["alerts"]
+
+
+def test_env_overrides_and_token(tmp_path, monkeypatch):
+    p = tmp_path / "c.yaml"
+    p.write_text('emplacements: [{nom: A, lat: 1, lon: 2}]\n')
+    monkeypatch.setenv("NTFY_URL", "https://ntfy.example.org/")
+    monkeypatch.setenv("NTFY_TOPIC", "alertes")
+    monkeypatch.setenv("NTFY_TOKEN", "tk_secret")
+    c = wa.load_config(p)
+    n = wa.Ntfy(c["ntfy_server"], c["ntfy_topic"], c["ntfy_token"])
+    assert n.server == "https://ntfy.example.org" and n.headers()["Authorization"] == "Bearer tk_secret"
+    monkeypatch.delenv("NTFY_TOKEN")
+    assert "Authorization" not in wa.Ntfy("s", "t", wa.load_config(p)["ntfy_token"]).headers()
+
+
+def test_healthcheck(tmp_path):
+    state = tmp_path / "state.json"
+    assert wa.healthcheck(state, 60) == 1
+    wa.last_run_path(state).touch()
+    assert wa.healthcheck(state, 60) == 0
