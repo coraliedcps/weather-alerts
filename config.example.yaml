@@ -20,6 +20,9 @@ emplacements:
     province: "Negros Oriental"
     seuil_signal_pagasa: 1
 
+# Pour un emplacement hors des Philippines : pas de « province » (PAGASA), et
+# ajoutez fuseau: "Zone/Ville" (ex. "America/Adak") pour l'heure locale des messages.
+
 # --- Réglages facultatifs (valeurs par défaut) ---
 # intervalle_minutes: 60       # un passage toutes les 60 min
 # horizon_heures: 120          # 5 jours de prévision
