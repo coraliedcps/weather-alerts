@@ -82,7 +82,8 @@ nano .env
 ```
 
 - `NTFY_URL` et `NTFY_TOKEN` : recopiez les valeurs affichées juste avant.
-- `NTFY_TOPIC` : mettez un **nouveau** nom de canal, différent de celui des alertes TER (par exemple `weather-alerts`), pour séparer les deux types d'alertes dans l'appli.
+- `NTFY_TOPIC` : mettez un **nouveau** nom de canal, différent de celui des alertes TER, pour séparer les deux types d'alertes dans l'appli.
+  - ⚠️ Sur un serveur ntfy public (ntfy.sh), **le nom du canal est le seul secret** : n'importe qui qui le devine peut lire vos alertes (elles révèlent où vous êtes) ou y publier de fausses alertes. Évitez un nom évident comme `weather-alerts` ; ajoutez une suite aléatoire, comme pour le canal TER. Pour en générer un : `echo "weather-alerts-$(head -c 16 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 20)"`
   - Si votre serveur ntfy a des droits par canal, autorisez ce nouveau canal pour le jeton.
 
 Enregistrez avec `Ctrl+O` puis `Entrée`, quittez avec `Ctrl+X`.
