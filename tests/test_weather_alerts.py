@@ -233,3 +233,17 @@ def test_fallback_source_named_in_message():
     wa.Runner(cfg(), st, n, NOW, wind_source=lambda *a: wa.met_norway_to_hourly(MET_RAW, 123.12),
               cyclone_source=lambda: []).run()
     assert "rafales 41 kts prévues mercredi 20h" in n.sent[0][1] and "secours : MET Norway" in n.sent[0][1]
+
+
+def test_met_norway_uses_location_timezone():
+    data = wa.met_norway_to_hourly(MET_RAW, -176.65, "America/Adak")
+    assert data["utc_offset_seconds"] in (-10 * 3600, -9 * 3600)   # HST-Aléoutiennes (heure d'été : -9)
+    assert wa.met_norway_to_hourly(MET_RAW, 123.12)["utc_offset_seconds"] == 8 * 3600
+
+
+def test_example_config_loads(monkeypatch):
+    monkeypatch.setenv("NTFY_TOPIC", "t")
+    c = wa.load_config(Path(__file__).resolve().parent.parent / "config.example.yaml")
+    names = [l["nom"] for l in c["emplacements"]]
+    assert names == ["Tambobo Bay", "Dumaguete", "Andreanof Islands"]
+    assert not c["emplacements"][2].get("province")
