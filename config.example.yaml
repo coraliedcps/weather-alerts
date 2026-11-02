@@ -1,0 +1,27 @@
+# Copiez ce fichier en config.yaml puis adaptez-le.
+
+# Nom du « canal » ntfy. Choisissez-le long et imprévisible : quiconque le connaît
+# peut lire vos alertes. (Vous pouvez aussi le mettre dans le secret GitHub NTFY_TOPIC,
+# qui prend alors le dessus.)
+ntfy_topic: "CHANGEZ-MOI"
+
+emplacements:
+  - nom: "Tambobo Bay"
+    lat: 9.07
+    lon: 123.12
+    seuil_rafales_kts: 35     # alerte si rafales prévues >= ce seuil
+    rayon_cyclone_km: 500     # alerte si un cyclone passe à moins de X km
+  - nom: "Dumaguete"
+    lat: 9.31
+    lon: 123.31
+    seuil_rafales_kts: 30
+    rayon_cyclone_km: 300
+
+# --- Réglages facultatifs (valeurs par défaut) ---
+# horizon_heures: 120          # 5 jours de prévision
+# rayon_urgence_km: 200        # cyclone plus proche -> notification urgente
+# fuseau: "Asia/Manila"        # fuseau du contrôle quotidien
+# heure_controle: 8            # heure locale du « Surveillance OK — RAS »
+# marge_fin_kts: 2             # fin d'alerte quand rafales < seuil - 2 (évite les va-et-vient)
+# escalade_rafales_kts: 5      # nouvelle notif si les rafales gagnent 5 kts
+# escalade_cyclone_km: 50      # nouvelle notif si le cyclone se rapproche de 50 km
