@@ -5,6 +5,7 @@ sur Raspberry Pi) ou une seule fois ; l'état est gardé dans state.json pour ne
 
 Sources (gratuites, sans clé) :
   - Open-Meteo : prévisions horaires de rafales et de vent moyen (en nœuds)
+  - MET Norway : secours automatique si Open-Meteo ne répond pas
   - GDACS      : cyclones tropicaux actifs et trajectoire prévue
   - PAGASA     : signaux officiels d'alerte vent (TCWS n° 1 à 5) par province
 """
@@ -31,9 +32,11 @@ from zoneinfo import ZoneInfo
 import yaml
 
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+MET_NORWAY = "https://api.met.no/weatherapi/locationforecast/2.0/complete"
+MS_TO_KT = 1.943844
 GDACS_EVENTS = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP"
 PAGASA_URL = "https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin"
-USER_AGENT = "weather-alerts/1.0"
+USER_AGENT = "weather-alerts/1.1 github.com/coraliedcps/weather-alerts"
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 FAILURES_BEFORE_WARNING = 3  # 3 passages de suite en échec (~3 h) -> on prévient
 APP_NAME = "Weather Alerts"  # en tête de chaque notification
@@ -78,8 +81,8 @@ def get_url(url: str, parse=json.loads, timeout: int = 30, retries: int = 3):
     raise RuntimeError(f"échec de {url} : {last}")
 
 
-def get_json(url: str):
-    return get_url(url)
+def get_json(url: str, retries: int = 3):
+    return get_url(url, retries=retries)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -202,11 +205,53 @@ class WindPeak:
     when: datetime  # heure locale de l'emplacement
 
 
-def fetch_wind(lat: float, lon: float, horizon_h: int) -> dict:
+def fetch_open_meteo(lat: float, lon: float, horizon_h: int) -> dict:
     days = min(16, math.ceil(horizon_h / 24) + 1)
     qs = urlencode({"latitude": lat, "longitude": lon, "hourly": "wind_gusts_10m,wind_speed_10m",
                     "wind_speed_unit": "kn", "forecast_days": days, "timezone": "auto"})
-    return get_json(f"{OPEN_METEO}?{qs}")
+    data = get_json(f"{OPEN_METEO}?{qs}", retries=2)
+    data["source"] = "Open-Meteo"
+    return data
+
+
+def met_norway_to_hourly(raw: dict, lon: float) -> dict:
+    """Convertit la réponse MET Norway (UTC, m/s) au format Open-Meteo (heure locale, nœuds)."""
+    # MET Norway donne l'heure UTC : on affiche l'heure locale approchée d'après la longitude
+    # (exacte aux Philippines, UTC+8 sans heure d'été).
+    offset_h = round(lon / 15)
+    tz = timezone(timedelta(hours=offset_h))
+    times, gusts, means = [], [], []
+    for step in raw.get("properties", {}).get("timeseries", []):
+        details = step.get("data", {}).get("instant", {}).get("details", {})
+        gust = details.get("wind_speed_of_gust")
+        if gust is None:
+            continue
+        dt = datetime.fromisoformat(step["time"].replace("Z", "+00:00")).astimezone(tz)
+        times.append(dt.replace(tzinfo=None).isoformat(timespec="minutes"))
+        gusts.append(gust * MS_TO_KT)
+        means.append((details.get("wind_speed") or 0) * MS_TO_KT)
+    if not gusts:  # pas de rafales -> inutilisable (ne surtout pas conclure « pas de vent »)
+        raise RuntimeError("MET Norway : aucune prévision de rafales dans la réponse")
+    return {"utc_offset_seconds": offset_h * 3600, "source": "MET Norway",
+            "hourly": {"time": times, "wind_gusts_10m": gusts, "wind_speed_10m": means}}
+
+
+def fetch_met_norway(lat: float, lon: float, horizon_h: int) -> dict:
+    qs = urlencode({"lat": round(lat, 4), "lon": round(lon, 4)})  # 4 décimales max (règle MET)
+    return met_norway_to_hourly(get_json(f"{MET_NORWAY}?{qs}", retries=2), lon)
+
+
+def fetch_wind(lat: float, lon: float, horizon_h: int,
+               sources=(fetch_open_meteo, fetch_met_norway)) -> dict:
+    """Open-Meteo, puis MET Norway en secours. Échoue seulement si toutes les sources échouent."""
+    errors = []
+    for source in sources:
+        try:
+            return source(lat, lon, horizon_h)
+        except Exception as exc:
+            log(f"{source.__name__} en échec : {exc}")
+            errors.append(str(exc))
+    raise RuntimeError(" / ".join(errors))
 
 
 def wind_peak(data: dict, now: datetime, horizon_h: int) -> WindPeak | None:
@@ -455,7 +500,8 @@ class Runner:
         name, key = loc["nom"], f"vent:{loc['nom']}"
         horizon = int(self.cfg["horizon_heures"])
         try:
-            peak = wind_peak(self.wind_source(loc["lat"], loc["lon"], horizon), self.now, horizon)
+            data = self.wind_source(loc["lat"], loc["lon"], horizon)
+            peak = wind_peak(data, self.now, horizon)
             self._source_ok(key)
         except Exception as exc:
             return self._source_failed(key, exc)
@@ -475,6 +521,8 @@ class Runner:
             return
         msg = f"{name} : rafales {peak.gust} kts prévues {when_fr(peak.when, self.now)} " \
               f"(vent moyen {peak.mean} kts)"
+        if data.get("source") not in (None, "Open-Meteo"):
+            msg += f" — source de secours : {data['source']}"
         title = f"Vent fort — {name}" if action == "new" else f"Vent en aggravation — {name}"
         if self._notify(title, msg, P_HIGH, ["wind_face", "warning"]):
             self.state["alerts"][key] = {"level": peak.gust, "priority": P_HIGH, "since":

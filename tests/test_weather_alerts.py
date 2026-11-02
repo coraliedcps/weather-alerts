@@ -199,3 +199,37 @@ def test_healthcheck(tmp_path):
     assert wa.healthcheck(state, 60) == 1
     wa.last_run_path(state).touch()
     assert wa.healthcheck(state, 60) == 0
+
+
+MET_RAW = {"properties": {"timeseries": [
+    {"time": "2026-11-02T00:00:00Z", "data": {"instant": {"details": {"wind_speed": 5.0, "wind_speed_of_gust": 9.0}}}},
+    {"time": "2026-11-04T12:00:00Z", "data": {"instant": {"details": {"wind_speed": 14.4, "wind_speed_of_gust": 21.1}}}},
+    {"time": "2026-11-05T00:00:00Z", "data": {"instant": {"details": {"wind_speed": 3.0}}}},
+]}}
+
+
+def test_met_norway_conversion():
+    data = wa.met_norway_to_hourly(MET_RAW, 123.12)
+    peak = wa.wind_peak(data, NOW, 120)
+    assert peak.gust == 41 and peak.mean == 28                    # m/s -> kts
+    assert peak.when.hour == 20 and peak.when.utcoffset() == timedelta(hours=8)  # 12h UTC = 20h Manille
+    import pytest
+    with pytest.raises(RuntimeError):
+        wa.met_norway_to_hourly({"properties": {"timeseries": [MET_RAW["properties"]["timeseries"][2]]}}, 123)
+
+
+def test_wind_fallback_order():
+    def down(*a): raise RuntimeError("503")
+    def met(*a): return {"source": "MET Norway"}
+    assert wa.fetch_wind(9, 123, 120, sources=(down, met))["source"] == "MET Norway"
+    import pytest
+    with pytest.raises(RuntimeError, match="503"):
+        wa.fetch_wind(9, 123, 120, sources=(down, down))
+
+
+def test_fallback_source_named_in_message():
+    st = wa.load_state(Path("/nonexistent"))
+    n = Rec()
+    wa.Runner(cfg(), st, n, NOW, wind_source=lambda *a: wa.met_norway_to_hourly(MET_RAW, 123.12),
+              cyclone_source=lambda: []).run()
+    assert "rafales 41 kts prévues mercredi 20h" in n.sent[0][1] and "secours : MET Norway" in n.sent[0][1]
