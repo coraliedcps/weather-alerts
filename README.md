@@ -4,7 +4,7 @@ Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, en
 
 ## Ce que ça fait
 
-- **Vent** : alerte si les rafales prévues dans les **5 prochains jours** atteignent ou dépassent le seuil de l'emplacement (35 kts par défaut). Source : Open-Meteo.
+- **Vent** : alerte si les rafales prévues dans les **5 prochains jours** atteignent ou dépassent le seuil de l'emplacement (35 kts par défaut). Source : Open-Meteo, avec MET Norway (institut météo norvégien, gratuit, sans clé) en secours automatique si Open-Meteo ne répond pas. La notification précise alors « source de secours : MET Norway ».
 - **Cyclones** : alerte si un cyclone actif, ou sa trajectoire prévue, passe à moins de `rayon_cyclone_km`. Source : GDACS.
 - **Signaux PAGASA** : alerte quand un signal officiel d'alerte vent (TCWS n° 1 à 5) est en vigueur sur la province de l'emplacement. Source : page des bulletins cycloniques de PAGASA.
 - **Anti-spam** : une alerte n'est envoyée qu'une fois. Nouvelle notification seulement si ça s'aggrave (rafales +5 kts, cyclone 50 km plus près, catégorie supérieure, passage en urgence) ou si l'alerte se termine.
@@ -172,6 +172,7 @@ sudo systemctl daemon-reload && sudo systemctl enable --now weather-alerts-updat
   - Une baisse de signal n'est pas notifiée ; une hausse ou la levée complète l'est.
   - Ce lecteur n'a pas pu être testé sur la vraie page (réseau bloqué lors de l'écriture). Lors du prochain cyclone, lancez `docker compose run --rm weather-alerts --pagasa` et comparez avec le site de PAGASA. Si la page devient illisible (format changé, site en panne), vous recevez « Surveillance dégradée » après ~3 h.
 - **Rafales** : Open-Meteo donne la rafale maximale de chaque heure ; les rafales locales réelles (effet de côte, de relief) peuvent dépasser la prévision.
+- **Source de secours (MET Norway)** : prévision heure par heure sur ~2 jours et demi, puis toutes les 6 h ; au-delà, une rafale brève entre deux échéances peut passer inaperçue. Elle n'est utilisée que pendant les pannes d'Open-Meteo. Les journaux indiquent `fetch_open_meteo en échec` quand le secours prend le relais.
 
 ## Réglages facultatifs
 
