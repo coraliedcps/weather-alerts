@@ -1,6 +1,6 @@
 # weather-alerts
 
-Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, envoyées en notification push sur votre téléphone via [ntfy](https://ntfy.sh). Tout tourne gratuitement sur GitHub Actions, toutes les 30 minutes.
+Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, envoyées en notification push sur votre téléphone via [ntfy](https://ntfy.sh). Tout tourne gratuitement sur GitHub Actions, toutes les heures. Chaque notification porte en titre « Weather Alerts — … ».
 
 ## Ce que ça fait
 
@@ -60,9 +60,9 @@ Ensuite tout est automatique.
 
 ## Limites à connaître
 
-- **Pas de temps réel à la seconde** : GitHub retarde parfois les tâches planifiées de 5 à 15 min. Les bulletins cycloniques sortent toutes les 6 h (3 h près des terres) ; vous êtes prévenue au passage suivant.
+- **Pas de temps réel à la seconde** : GitHub retarde parfois les tâches planifiées de 5 à 15 min. Les bulletins cycloniques sortent toutes les 6 h (3 h près des terres) ; vous êtes prévenue au passage suivant (au plus ~1 h après).
 - **Dépôt inactif** : GitHub désactive les tâches planifiées après 60 jours sans activité. Le contrôle quotidien modifie `state.json` chaque jour, ce qui crée un commit et garde le dépôt actif.
-- **Minutes gratuites** : ~48 passages/jour ≈ 1 450 min/mois, sous les 2 000 du plan gratuit (dépôt privé).
+- **Minutes gratuites** : ~24 passages/jour ≈ 750 min/mois, sous les 2 000 du plan gratuit (dépôt privé).
 - **Cyclones (GDACS)** : GDACS ne liste que les systèmes jugés significatifs ; une toute petite dépression peut manquer. Le format de sa trajectoire n'a pas pu être vérifié en direct lors de l'écriture (réseau bloqué) : au premier passage, regardez les journaux du job et lancez `--dry-run` quand un cyclone est actif pour confirmer que la distance affichée est cohérente.
 - **Rafales** : Open-Meteo donne la rafale maximale de chaque heure ; les rafales locales réelles (effet de côte, de relief) peuvent dépasser la prévision.
 

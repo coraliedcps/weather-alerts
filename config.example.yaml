@@ -14,8 +14,8 @@ emplacements:
   - nom: "Dumaguete"
     lat: 9.31
     lon: 123.31
-    seuil_rafales_kts: 30
-    rayon_cyclone_km: 300
+    seuil_rafales_kts: 35
+    rayon_cyclone_km: 500
 
 # --- Réglages facultatifs (valeurs par défaut) ---
 # horizon_heures: 120          # 5 jours de prévision

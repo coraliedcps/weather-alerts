@@ -2,7 +2,7 @@ name: Surveillance météo
 
 on:
   schedule:
-    - cron: "7,37 * * * *"   # toutes les 30 min (décalé des :00/:30, très chargés chez GitHub)
+    - cron: "7 * * * *"   # toutes les heures, à h07 (décalé de :00, très chargé chez GitHub)
   workflow_dispatch:           # lancement manuel depuis l'onglet Actions
 
 permissions:

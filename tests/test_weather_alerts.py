@@ -130,3 +130,7 @@ def test_parse_track_and_classify():
     pts = wa.parse_track(gj)
     assert pts[0][2] is not None and len(pts) > 3
     assert wa.classify(30)[0] == "Dépression tropicale" and wa.classify(100)[0] == "Typhon cat. 3"
+
+
+def test_title_prefix():
+    assert wa.full_title("Vent fort — Baie") == "Weather Alerts — Vent fort — Baie"

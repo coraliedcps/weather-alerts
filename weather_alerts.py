@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """weather-alerts : surveille le vent (rafales) et les cyclones autour d'emplacements
-et envoie des notifications push via ntfy. Prévu pour tourner toutes les 30 min
+et envoie des notifications push via ntfy. Prévu pour tourner toutes les heures
 (GitHub Actions) ; l'état est gardé dans state.json pour ne pas spammer.
 
 Sources (gratuites, sans clé) :
@@ -29,7 +29,12 @@ OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 GDACS_EVENTS = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP"
 USER_AGENT = "weather-alerts/1.0"
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
-FAILURES_BEFORE_WARNING = 6  # 6 passages de suite en échec (~3 h) -> on prévient
+FAILURES_BEFORE_WARNING = 3  # 3 passages de suite en échec (~3 h) -> on prévient
+APP_NAME = "Weather Alerts"  # en tête de chaque notification
+
+
+def full_title(title: str) -> str:
+    return f"{APP_NAME} — {title}"
 
 # Priorités ntfy
 P_LOW, P_NORMAL, P_HIGH, P_URGENT = 2, 3, 4, 5
@@ -154,7 +159,7 @@ class Ntfy:
         self.server, self.topic = server.rstrip("/"), topic
 
     def send(self, title: str, message: str, priority: int = P_NORMAL, tags: list[str] | None = None) -> None:
-        body = json.dumps({"topic": self.topic, "title": title, "message": message,
+        body = json.dumps({"topic": self.topic, "title": full_title(title), "message": message,
                            "priority": priority, "tags": tags or []}).encode("utf-8")
         req = urllib.request.Request(self.server, data=body, method="POST", headers={
             "Content-Type": "application/json", "User-Agent": USER_AGENT})
@@ -164,7 +169,7 @@ class Ntfy:
 
 class DryRun:
     def send(self, title, message, priority=P_NORMAL, tags=None):
-        print(f"[DRY-RUN] (priorité {priority}) {title} — {message}")
+        print(f"[DRY-RUN] (priorité {priority}) {full_title(title)} | {message}")
 
 
 # --------------------------------------------------------------------------- vent
@@ -442,7 +447,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = load_config(args.config)
     notifier = DryRun() if args.dry_run else Ntfy(cfg["ntfy_server"], cfg["ntfy_topic"])
     if args.test:
-        notifier.send("Test weather-alerts", "Si vous lisez ceci, les notifications fonctionnent.", P_NORMAL, ["tada"])
+        notifier.send("Test", "Si vous lisez ceci, les notifications fonctionnent.", P_NORMAL, ["tada"])
         return 0
     state = load_state(args.state)
     code = Runner(cfg, state, notifier, datetime.now(timezone.utc)).run()
