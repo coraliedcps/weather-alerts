@@ -1,0 +1,30 @@
+services:
+  weather-alerts:
+    build:
+      context: .
+    image: weather-alerts:local
+    container_name: weather-alerts
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      TZ: Europe/Paris
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - weather-data:/data
+    mem_limit: 100m
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: "2m"
+        max-file: "3"
+
+volumes:
+  weather-data:

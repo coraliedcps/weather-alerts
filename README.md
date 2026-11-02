@@ -1,6 +1,6 @@
 # weather-alerts
 
-Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, envoyées en notification push sur votre téléphone via [ntfy](https://ntfy.sh). Tout tourne gratuitement sur GitHub Actions, toutes les heures. Chaque notification porte en titre « Weather Alerts — … ».
+Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, envoyées en notification push sur votre téléphone via [ntfy](https://ntfy.sh). Tourne en continu sur un Raspberry Pi (Docker), comme `commute-alerts`, avec un passage toutes les heures. Chaque notification porte en titre « Weather Alerts — … ».
 
 ## Ce que ça fait
 
@@ -21,58 +21,156 @@ Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, en
 | Fin d'alerte, source en panne | Normale |
 | Contrôle quotidien | Basse |
 
-## Mise en route pas à pas
+## Installation sur le Raspberry Pi
 
-### 1. Installer ntfy sur le téléphone
+Même principe que `commute-alerts` : un conteneur Docker qui tourne en permanence et redémarre tout seul (coupure de courant, reboot).
 
-1. Installez l'appli **ntfy** (Android : Play Store ou F-Droid ; iPhone : App Store).
-2. Choisissez un nom de canal long et imprévisible, par exemple `bateau-alerte-x7k2q9` (inventez le vôtre : quiconque connaît le nom peut lire vos alertes).
-3. Dans l'appli : **+** → saisissez ce nom → **S'abonner**.
-4. Pour que la priorité *urgente* sonne même en mode silencieux : réglages de l'appli, canal de notification « Urgent » → autoriser « Ne pas déranger ».
+Toutes les commandes ci-dessous se tapent **sur le Pi**, dans un terminal (en SSH par exemple). Copiez-collez-les une par une.
 
-### 2. Créer le dépôt GitHub (privé)
+### 1. Récupérer le projet
 
-1. https://github.com/new → nom `weather-alerts` → **Private** (vos coordonnées ne doivent pas être publiques).
-2. Envoyez-y le contenu de ce dossier (`weather_alerts.py`, `requirements.txt`, `config.example.yaml`, `.github/`, `tests/`, `.gitignore`, `README.md`), à la racine du dépôt. `.github/workflows/check.yml` doit être à la racine, sinon GitHub ne le voit pas.
-
-### 3. Configurer
-
-1. Copiez `config.example.yaml` en **`config.yaml`**.
-2. Mettez votre nom de canal dans `ntfy_topic` et vos emplacements (nom, lat, lon, seuil, rayon, province).
-   - `province` : nom de la province tel qu'écrit dans les bulletins PAGASA, en anglais (ex. `"Negros Oriental"`). Sans ce champ, pas de suivi PAGASA pour l'emplacement.
-   - Variante plus discrète : laissez `CHANGEZ-MOI` dans le fichier et créez un secret `NTFY_TOPIC` (Settings → Secrets and variables → Actions → New repository secret). Le secret prend le dessus.
-3. Ajouter un emplacement = ajouter 5 lignes au fichier.
-
-### 4. Tester avant d'activer
-
-Sur votre ordinateur (Python 3.10+) :
+Allez dans le dossier qui contient déjà `commute-alerts` (le dossier parent) :
 
 ```bash
-pip install -r requirements.txt
-python weather_alerts.py --test       # doit faire sonner votre téléphone
-python weather_alerts.py --dry-run    # affiche ce qui serait envoyé, sans rien envoyer
-python weather_alerts.py --pagasa     # affiche les signaux PAGASA lus sur la page (diagnostic)
+cd ~
 ```
 
-### 5. Activer sur GitHub
+Regardez comment `commute-alerts` a été cloné, pour utiliser la même méthode :
 
-1. Poussez `config.yaml` sur le dépôt.
-2. Onglet **Actions** → si GitHub le demande, activez les workflows.
-3. Ouvrez **Surveillance météo** → **Run workflow** pour un premier passage immédiat.
-4. Vérifiez que le job est vert et que `state.json` apparaît dans le dépôt.
+```bash
+git -C commute-alerts remote -v
+```
 
-Ensuite tout est automatique.
+- Si l'adresse commence par `git@github.com:` (clé SSH) :
+
+  ```bash
+  git clone git@github.com:coraliedcps/weather-alerts.git
+  ```
+
+- Si elle commence par `https://` :
+
+  ```bash
+  git clone https://github.com/coraliedcps/weather-alerts.git
+  ```
+
+  (GitHub demande alors votre identifiant et, comme mot de passe, un jeton d'accès personnel.)
+
+Puis entrez dans le dossier :
+
+```bash
+cd weather-alerts
+```
+
+### 2. Régler ntfy : le fichier `.env`
+
+Créez le fichier à partir du modèle :
+
+```bash
+cp .env.example .env
+```
+
+Le plus simple est de reprendre l'adresse du serveur et le jeton de `commute-alerts` :
+
+```bash
+grep -E '^NTFY_(URL|TOKEN)=' ../commute-alerts/.env
+```
+
+Ouvrez `.env` pour le modifier :
+
+```bash
+nano .env
+```
+
+- `NTFY_URL` et `NTFY_TOKEN` : recopiez les valeurs affichées juste avant.
+- `NTFY_TOPIC` : mettez un **nouveau** nom de canal, différent de celui des alertes TER (par exemple `meteo-bateau`), pour séparer les deux types d'alertes dans l'appli.
+  - Si votre serveur ntfy a des droits par canal, autorisez ce nouveau canal pour le jeton.
+
+Enregistrez avec `Ctrl+O` puis `Entrée`, quittez avec `Ctrl+X`.
+
+Sur le téléphone, dans l'appli ntfy : **+** → choisissez votre serveur (le même que pour les alertes TER) → saisissez le nouveau nom de canal → **S'abonner**.
+
+### 3. Régler les emplacements : le fichier `config.yaml`
+
+```bash
+cp config.example.yaml config.yaml
+```
+
+Il contient déjà Tambobo Bay et Dumaguete (35 kts, 500 km, province Negros Oriental). Pour modifier : `nano config.yaml`.
+
+### 4. Construire et démarrer
+
+```bash
+docker build --network host -t weather-alerts:local .
+```
+
+```bash
+docker compose run --rm weather-alerts --test
+```
+
+→ votre téléphone doit recevoir « Weather Alerts — Test ». Sinon, vérifiez `.env` (étape 2).
+
+```bash
+docker compose up -d
+```
+
+C'est parti : un passage maintenant, puis toutes les heures. Pour voir ce qui se passe :
+
+```bash
+docker compose logs -f
+```
+
+(`Ctrl+C` pour quitter l'affichage ; ça n'arrête pas la surveillance.) Vous devez voir `passage terminé` au bout d'une minute ou deux.
+
+### 5. (Facultatif) Mises à jour automatiques
+
+Comme pour `commute-alerts`, `tools/auto_update.sh` récupère les nouveautés publiées sur GitHub, reconstruit et redémarre (et revient à l'ancienne version si la nouvelle ne démarre pas). À lancer chaque jour par un timer systemd. Remplacez `VOTRE_UTILISATEUR` par votre nom d'utilisateur sur le Pi (commande `whoami`) :
+
+```bash
+sudo tee /etc/systemd/system/weather-alerts-update.service >/dev/null <<'UNIT'
+[Service]
+Type=oneshot
+User=VOTRE_UTILISATEUR
+ExecStart=/home/VOTRE_UTILISATEUR/weather-alerts/tools/auto_update.sh
+UNIT
+```
+
+```bash
+sudo tee /etc/systemd/system/weather-alerts-update.timer >/dev/null <<'UNIT'
+[Timer]
+OnCalendar=*-*-* 11:30
+RandomizedDelaySec=30m
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now weather-alerts-update.timer
+```
+
+## Commandes utiles (dans le dossier `weather-alerts`)
+
+| Pour… | Commande |
+|---|---|
+| Voir les journaux | `docker compose logs -f` |
+| Notification de test | `docker compose run --rm weather-alerts --test` |
+| Voir ce qui serait envoyé, sans rien envoyer | `docker compose run --rm weather-alerts --dry-run` |
+| Voir les signaux PAGASA lus | `docker compose run --rm weather-alerts --pagasa` |
+| État de santé | `docker compose ps` (colonne STATUS : `healthy`) |
+| Appliquer une modif de `config.yaml` ou `.env` | `docker compose up -d --force-recreate` |
+| Arrêter / relancer | `docker compose down` / `docker compose up -d` |
 
 ## Limites à connaître
 
-- **Pas de temps réel à la seconde** : GitHub retarde parfois les tâches planifiées de 5 à 15 min. Les bulletins cycloniques sortent toutes les 6 h (3 h près des terres) ; vous êtes prévenue au passage suivant (au plus ~1 h après).
-- **Dépôt inactif** : GitHub désactive les tâches planifiées après 60 jours sans activité. Le contrôle quotidien modifie `state.json` chaque jour, ce qui crée un commit et garde le dépôt actif.
-- **Minutes gratuites** : ~24 passages/jour ≈ 750 min/mois, sous les 2 000 du plan gratuit (dépôt privé).
-- **Cyclones (GDACS)** : GDACS ne liste que les systèmes jugés significatifs ; une toute petite dépression peut manquer. Le format de sa trajectoire n'a pas pu être vérifié en direct lors de l'écriture (réseau bloqué) : au premier passage, regardez les journaux du job et lancez `--dry-run` quand un cyclone est actif pour confirmer que la distance affichée est cohérente.
+- **Le Pi doit rester allumé et connecté.** S'il s'arrête, plus d'alertes : c'est le rôle du contrôle quotidien « Surveillance OK ». S'il ne vient pas, allez voir le Pi.
+- **Contrôle quotidien** : réglé à 8 h heure de Manille, soit 1 h ou 2 h du matin en France ; en priorité basse il ne sonne pas. Pour le recevoir le matin en France : `fuseau: "Europe/Paris"` dans `config.yaml`.
+- **Délai** : les bulletins cycloniques sortent toutes les 6 h (3 h près des terres) ; vous êtes prévenue au passage suivant, au plus ~1 h après (`intervalle_minutes` dans `config.yaml` pour aller plus vite).
+- **Cyclones (GDACS)** : GDACS ne liste que les systèmes jugés significatifs ; une toute petite dépression peut manquer. Le format de sa trajectoire n'a pas pu être vérifié en direct lors de l'écriture (réseau bloqué) : au premier passage, regardez les journaux (`docker compose logs`) et lancez `--dry-run` quand un cyclone est actif pour confirmer que la distance affichée est cohérente.
 - **Signaux PAGASA** : PAGASA ne fournit pas de données structurées ; le script lit la page web des bulletins et y cherche « Wind Signal No. X » suivi des provinces. Points à connaître :
   - Si un signal ne couvre qu'**une partie** de la province, vous êtes quand même alertée (prudence) ; la notification cite l'extrait du bulletin (« northern portion of Negros Oriental (Guihulngan City…) ») pour que vous jugiez.
   - Une baisse de signal n'est pas notifiée ; une hausse ou la levée complète l'est.
-  - Ce lecteur n'a pas pu être testé sur la vraie page (réseau bloqué lors de l'écriture). Lors du prochain cyclone, lancez `python weather_alerts.py --pagasa` et comparez avec le site de PAGASA. Si la page devient illisible (format changé, site en panne), vous recevez « Surveillance dégradée » après ~3 h.
+  - Ce lecteur n'a pas pu être testé sur la vraie page (réseau bloqué lors de l'écriture). Lors du prochain cyclone, lancez `docker compose run --rm weather-alerts --pagasa` et comparez avec le site de PAGASA. Si la page devient illisible (format changé, site en panne), vous recevez « Surveillance dégradée » après ~3 h.
 - **Rafales** : Open-Meteo donne la rafale maximale de chaque heure ; les rafales locales réelles (effet de côte, de relief) peuvent dépasser la prévision.
 
 ## Réglages facultatifs
@@ -88,4 +186,5 @@ Seuil sur le vent moyen, petite page web pour éditer les emplacements.
 ```bash
 pip install pytest -r requirements.txt
 python -m pytest tests
+python weather_alerts.py --dry-run   # hors Docker : lit config.yaml, NTFY_* depuis l'environnement
 ```

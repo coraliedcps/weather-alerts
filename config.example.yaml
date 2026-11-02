@@ -1,9 +1,8 @@
 # Copiez ce fichier en config.yaml puis adaptez-le.
 
-# Nom du « canal » ntfy. Choisissez-le long et imprévisible : quiconque le connaît
-# peut lire vos alertes. (Vous pouvez aussi le mettre dans le secret GitHub NTFY_TOPIC,
-# qui prend alors le dessus.)
-ntfy_topic: "CHANGEZ-MOI"
+# Le serveur ntfy, le canal et le jeton se règlent dans .env (NTFY_URL, NTFY_TOPIC,
+# NTFY_TOKEN), comme pour commute-alerts. Ils peuvent aussi être mis ici
+# (ntfy_server, ntfy_topic, ntfy_token), mais .env reste prioritaire.
 
 emplacements:
   - nom: "Tambobo Bay"
@@ -22,6 +21,7 @@ emplacements:
     seuil_signal_pagasa: 1
 
 # --- Réglages facultatifs (valeurs par défaut) ---
+# intervalle_minutes: 60       # un passage toutes les 60 min
 # horizon_heures: 120          # 5 jours de prévision
 # rayon_urgence_km: 200        # cyclone plus proche -> notification urgente
 # fuseau: "Asia/Manila"        # fuseau du contrôle quotidien
