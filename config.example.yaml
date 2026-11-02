@@ -19,13 +19,9 @@ emplacements:
     rayon_cyclone_km: 500
     province: "Negros Oriental"
     seuil_signal_pagasa: 1
-  - nom: "Andreanof Islands"      # Aléoutiennes (Alaska), point de référence : Adak
-    lat: 51.88
-    lon: -176.65
-    seuil_rafales_kts: 35
-    rayon_cyclone_km: 500
-    fuseau: "America/Adak"        # heure locale des messages (utile hors Philippines)
-    # pas de « province » : les signaux PAGASA ne concernent que les Philippines
+
+# Pour un emplacement hors des Philippines : pas de « province » (PAGASA), et
+# ajoutez fuseau: "Zone/Ville" (ex. "America/Adak") pour l'heure locale des messages.
 
 # --- Réglages facultatifs (valeurs par défaut) ---
 # intervalle_minutes: 60       # un passage toutes les 60 min

@@ -96,7 +96,7 @@ Sur le téléphone, dans l'appli ntfy : **+** → choisissez votre serveur (le m
 cp config.example.yaml config.yaml
 ```
 
-Il contient déjà Tambobo Bay et Dumaguete (35 kts, 500 km, province Negros Oriental) et Andreanof Islands (35 kts, 500 km, sans PAGASA). Pour modifier : `nano config.yaml`. Pour un emplacement hors des Philippines, ajoutez `fuseau` (ex. `"America/Adak"`) pour que les heures des messages soient en heure locale même avec la source de secours.
+Il contient déjà Tambobo Bay et Dumaguete (35 kts, 500 km, province Negros Oriental). Pour modifier : `nano config.yaml`. Pour un emplacement hors des Philippines, ajoutez `fuseau` (ex. `"America/Adak"`) pour que les heures des messages soient en heure locale même avec la source de secours.
 
 ### 4. Construire et démarrer
 

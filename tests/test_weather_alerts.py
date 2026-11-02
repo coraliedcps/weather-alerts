@@ -245,5 +245,4 @@ def test_example_config_loads(monkeypatch):
     monkeypatch.setenv("NTFY_TOPIC", "t")
     c = wa.load_config(Path(__file__).resolve().parent.parent / "config.example.yaml")
     names = [l["nom"] for l in c["emplacements"]]
-    assert names == ["Tambobo Bay", "Dumaguete", "Andreanof Islands"]
-    assert not c["emplacements"][2].get("province")
+    assert names == ["Tambobo Bay", "Dumaguete"]
