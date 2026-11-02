@@ -82,7 +82,7 @@ nano .env
 ```
 
 - `NTFY_URL` et `NTFY_TOKEN` : recopiez les valeurs affichées juste avant.
-- `NTFY_TOPIC` : mettez un **nouveau** nom de canal, différent de celui des alertes TER (par exemple `meteo-bateau`), pour séparer les deux types d'alertes dans l'appli.
+- `NTFY_TOPIC` : mettez un **nouveau** nom de canal, différent de celui des alertes TER (par exemple `weather-alerts`), pour séparer les deux types d'alertes dans l'appli.
   - Si votre serveur ntfy a des droits par canal, autorisez ce nouveau canal pour le jeton.
 
 Enregistrez avec `Ctrl+O` puis `Entrée`, quittez avec `Ctrl+X`.
