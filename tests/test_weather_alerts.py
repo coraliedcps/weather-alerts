@@ -134,3 +134,48 @@ def test_parse_track_and_classify():
 
 def test_title_prefix():
     assert wa.full_title("Vent fort — Baie") == "Weather Alerts — Vent fort — Baie"
+
+
+BULLETIN = """<html><head><script>var signal = "Signal No. 5 Negros Oriental";</script></head><body>
+<h2>Tropical Cyclone Bulletin #7 — Typhoon "ADA"</h2>
+<h3>TROPICAL CYCLONE WIND SIGNALS IN EFFECT</h3>
+<table><tr><th>Wind Signal No. 2</th>
+<td>Visayas: Cebu, the northern portion of Negros Oriental (Guihulngan City, Vallehermoso); Bohol</td></tr>
+<tr><th>Wind Signal No. 1</th>
+<td>Visayas: Siquijor, the rest of Negros Oriental, Negros Occidental. Wind Signal No. 1 over Antique is now lifted.</td></tr>
+</table><p>Wind Signal No. 3 may be raised over Bohol.</p>
+<h3>HAZARDS AFFECTING LAND AREAS</h3><p>Heavy rainfall over Negros Oriental and Leyte.</p></body></html>"""
+
+
+def test_pagasa_parsing():
+    signals = wa.parse_pagasa_signals(wa.html_to_text(BULLETIN))
+    level, clause = wa.pagasa_signal_for(signals, "Negros Oriental")
+    assert level == 2 and "northern portion of Negros Oriental (Guihulngan City" in clause
+    assert wa.pagasa_signal_for(signals, "negros occidental")[0] == 1
+    assert wa.pagasa_signal_for(signals, "Siquijor")[0] == 1
+    assert wa.pagasa_signal_for(signals, "Antique") is None      # levé
+    assert wa.pagasa_signal_for(signals, "Bohol")[0] == 2         # « may be raised » ignoré
+    assert wa.pagasa_signal_for(signals, "Leyte") is None         # section dangers ignorée
+
+
+def run_pagasa(st, signals, n=None):
+    n = n or Rec()
+    c = cfg()
+    c["emplacements"][0].update(province="Negros Oriental")
+    wa.Runner(c, st, n, NOW, wind_source=lambda *a: wind_data(10), cyclone_source=lambda: [],
+              pagasa_source=lambda: signals).run()
+    return n.sent
+
+
+def test_pagasa_alert_lifecycle():
+    st = wa.load_state(Path("/nonexistent"))
+    assert run_pagasa(st, []) == []
+    s = run_pagasa(st, [(1, "Negros Oriental")])
+    assert s[0][2] == wa.P_HIGH and "Signal PAGASA n° 1" in s[0][0] and "36 h" in s[0][1]
+    assert run_pagasa(st, [(1, "Negros Oriental")]) == []
+    s = run_pagasa(st, [(3, "Negros Oriental")])
+    assert s[0][2] == wa.P_URGENT and "relevé au n° 3" in s[0][0]
+    assert run_pagasa(st, [(2, "Negros Oriental")]) == []         # baisse : silencieuse
+    assert len(run_pagasa(st, [(3, "Negros Oriental")])) == 1     # remonte : notifié
+    s = run_pagasa(st, [(1, "Cebu")])
+    assert "Fin de signal" in s[0][0] and not st["alerts"]

@@ -6,6 +6,7 @@ et envoie des notifications push via ntfy. Prévu pour tourner toutes les heures
 Sources (gratuites, sans clé) :
   - Open-Meteo : prévisions horaires de rafales et de vent moyen (en nœuds)
   - GDACS      : cyclones tropicaux actifs et trajectoire prévue
+  - PAGASA     : signaux officiels d'alerte vent (TCWS n° 1 à 5) par province
 """
 from __future__ import annotations
 
@@ -13,11 +14,14 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
@@ -27,6 +31,7 @@ import yaml
 
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 GDACS_EVENTS = "https://www.gdacs.org/gdacsapi/api/events/geteventlist/EVENTS4APP"
+PAGASA_URL = "https://www.pagasa.dost.gov.ph/tropical-cyclone/severe-weather-bulletin"
 USER_AGENT = "weather-alerts/1.0"
 JOURS = ["lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche"]
 FAILURES_BEFORE_WARNING = 3  # 3 passages de suite en échec (~3 h) -> on prévient
@@ -48,8 +53,9 @@ DEFAULTS = {
     "marge_fin_kts": 2,            # hystérésis : fin d'alerte sous seuil - marge
     "escalade_rafales_kts": 5,     # re-notifier si les rafales gagnent X kts
     "escalade_cyclone_km": 50,     # re-notifier si le cyclone se rapproche de X km
+    "pagasa_url": PAGASA_URL,      # page des bulletins cycloniques PAGASA
 }
-LOC_DEFAULTS = {"seuil_rafales_kts": 35, "rayon_cyclone_km": 500}
+LOC_DEFAULTS = {"seuil_rafales_kts": 35, "rayon_cyclone_km": 500, "seuil_signal_pagasa": 1}
 
 
 # --------------------------------------------------------------------------- utilitaires
@@ -57,17 +63,21 @@ def log(msg: str) -> None:
     print(msg, file=sys.stderr, flush=True)
 
 
-def get_json(url: str, timeout: int = 30, retries: int = 3):
+def get_url(url: str, parse=json.loads, timeout: int = 30, retries: int = 3):
     last: Exception | None = None
     for attempt in range(retries):
         try:
             req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
-                return json.load(resp)
+                return parse(resp.read().decode("utf-8", errors="replace"))
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
             last = exc
             time.sleep(2 * (attempt + 1))
     raise RuntimeError(f"échec de {url} : {last}")
+
+
+def get_json(url: str):
+    return get_url(url)
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -296,6 +306,96 @@ def closest_approach(cyc: Cyclone, lat: float, lon: float, now: datetime) -> App
     return best
 
 
+# --------------------------------------------------------------------------- PAGASA
+# Signaux officiels (Tropical Cyclone Wind Signals) : vents attendus, délai d'arrivée en heures
+TCWS = {1: ("39–61 km/h (21–33 kts)", 36), 2: ("62–88 km/h (34–47 kts)", 24),
+        3: ("89–117 km/h (48–63 kts)", 18), 4: ("118–184 km/h (64–99 kts)", 12),
+        5: ("≥ 185 km/h (≥ 100 kts)", 12)}
+SIGNAL_RE = re.compile(r"(?:wind\s+signal|tcws|signal)\s*(?:no\.?|number|#)\s*([1-5])\b", re.I)
+SEGMENT_STOP_RE = re.compile(r"hazards?\s+affecting|other\s+hazards|heavy\s+rainfall|storm\s+surge"
+                             r"|coastal\s+waters|track\s+and\s+intensity", re.I)
+# phrases à ignorer : signaux levés ou simplement envisagés
+NOT_IN_EFFECT_RE = re.compile(r"lifted|may\s+be\s+(?:raised|hoisted)|possib", re.I)
+
+
+class _TextExtractor(HTMLParser):
+    BLOCKS = {"p", "div", "br", "li", "ul", "ol", "tr", "td", "th", "table", "section",
+              "h1", "h2", "h3", "h4", "h5", "h6"}
+
+    def __init__(self):
+        super().__init__()
+        self.parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style"):
+            self._skip += 1
+        elif tag in self.BLOCKS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in ("script", "style"):
+            self._skip = max(0, self._skip - 1)
+        elif tag in self.BLOCKS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
+
+
+def html_to_text(html: str) -> str:
+    p = _TextExtractor()
+    p.feed(html)
+    text = re.sub(r"[ \t\r\xa0]+", " ", "".join(p.parts))
+    return re.sub(r"\s*\n\s*", "\n", text).strip()
+
+
+def fold(s: str) -> str:
+    """Minuscules sans accents, même longueur que l'original (les positions restent valables)."""
+    return "".join((unicodedata.normalize("NFKD", c)[:1] or " ").lower()[:1] or " " for c in s)
+
+
+def parse_pagasa_signals(text: str) -> list[tuple[int, str]]:
+    """[(numéro de signal, texte des zones concernées)] tels qu'écrits dans le bulletin."""
+    matches = list(SIGNAL_RE.finditer(text))
+    out: list[tuple[int, str]] = []
+    for i, m in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        seg = text[m.end():end]
+        if stop := SEGMENT_STOP_RE.search(seg):
+            seg = seg[:stop.start()]
+        sentences = re.split(r"(?<=\.)\s+|\n", seg[:4000])
+        seg = " ".join(s for s in sentences if s.strip() and not NOT_IN_EFFECT_RE.search(s))
+        if seg:
+            out.append((int(m.group(1)), seg))
+    return out
+
+
+def pagasa_signal_for(signals: list[tuple[int, str]], province: str) -> tuple[int, str] | None:
+    """Signal le plus élevé mentionnant la province, avec l'extrait du bulletin."""
+    pat = re.compile(r"\b" + re.escape(fold(province)) + r"\b")
+    best: tuple[int, str] | None = None
+    for level, seg in signals:
+        m = pat.search(fold(seg))
+        if not m or (best and level <= best[0]):
+            continue
+        start = seg.rfind(";", 0, m.start()) + 1
+        end = seg.find(";", m.end())
+        clause = seg[start:end if end != -1 else len(seg)].strip(" ,.")
+        if len(clause) > 220:
+            clause = clause[:217] + "…"
+        best = (level, clause)
+    return best
+
+
+def fetch_pagasa(url: str = PAGASA_URL) -> list[tuple[int, str]]:
+    text = get_url(url, parse=html_to_text)
+    if "tropical cyclone" not in text.lower():
+        raise RuntimeError("page PAGASA non reconnue (format changé ?)")
+    return parse_pagasa_signals(text)
+
+
 # --------------------------------------------------------------------------- logique d'alerte
 def transition(prev: dict | None, active: bool, worse: bool) -> str | None:
     """'new' | 'worse' | 'end' | None selon l'état mémorisé."""
@@ -308,9 +408,10 @@ def transition(prev: dict | None, active: bool, worse: bool) -> str | None:
 
 class Runner:
     def __init__(self, cfg: dict, state: dict, notifier, now: datetime,
-                 wind_source=fetch_wind, cyclone_source=fetch_cyclones):
+                 wind_source=fetch_wind, cyclone_source=fetch_cyclones, pagasa_source=None):
         self.cfg, self.state, self.notifier, self.now = cfg, state, notifier, now
         self.wind_source, self.cyclone_source = wind_source, cyclone_source
+        self.pagasa_source = pagasa_source or (lambda: fetch_pagasa(cfg["pagasa_url"]))
         self.send_errors = 0
 
     # -- envoi + mémorisation (l'état n'avance que si l'envoi a réussi)
@@ -416,6 +517,42 @@ class Runner:
             self.state["alerts"][key] = {"rank": rank, "priority": priority, "dist": round(ap.dist_km),
                                          "label": f"{label} {cyc.name}".strip(), "radius": loc["rayon_cyclone_km"]}
 
+    # -- signaux PAGASA
+    def check_pagasa(self) -> None:
+        locs = [l for l in self.cfg["emplacements"] if l.get("province")]
+        if not locs:
+            return
+        try:
+            signals = self.pagasa_source()
+            self._source_ok("pagasa")
+        except Exception as exc:
+            return self._source_failed("pagasa", exc)
+        for loc in locs:
+            name, province, key = loc["nom"], loc["province"], f"pagasa:{loc['nom']}"
+            hit = pagasa_signal_for(signals, province)
+            level = hit[0] if hit else 0
+            seuil = loc["seuil_signal_pagasa"]
+            prev = self.state["alerts"].get(key)
+            action = transition(prev, level >= seuil, bool(prev) and level > prev["level"])
+            if action is None:
+                if prev and level < prev["level"]:
+                    prev["level"] = level  # signal abaissé : mémorisé sans notifier
+                continue
+            if action == "end":
+                if self._notify(f"Fin de signal PAGASA — {name}",
+                                f"{province} : plus de signal PAGASA n° {seuil} ou plus en vigueur.",
+                                P_NORMAL, ["white_check_mark"]):
+                    del self.state["alerts"][key]
+                continue
+            winds, hours = TCWS[level]
+            priority = P_URGENT if level >= 3 else P_HIGH
+            title = (f"Signal PAGASA n° {level} — {name}" if action == "new"
+                     else f"Signal PAGASA relevé au n° {level} — {name}")
+            msg = (f"{province} : signal n° {level} en vigueur, vents de {winds} attendus sous {hours} h. "
+                   f"Zone : « {hit[1]} »")
+            if self._notify(title, msg, priority, ["triangular_flag_on_post", "warning"]):
+                self.state["alerts"][key] = {"level": level, "priority": priority}
+
     # -- contrôle quotidien
     def heartbeat(self) -> None:
         local = self.now.astimezone(ZoneInfo(self.cfg["fuseau"]))
@@ -431,6 +568,7 @@ class Runner:
         for loc in self.cfg["emplacements"]:
             self.check_wind(loc)
         self.check_cyclones()
+        self.check_pagasa()
         self.heartbeat()
         return 1 if self.send_errors else 0
 
@@ -442,9 +580,20 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--state", default="state.json", type=Path)
     ap.add_argument("--dry-run", action="store_true", help="affiche les notifications au lieu de les envoyer (état non écrit)")
     ap.add_argument("--test", action="store_true", help="envoie une notification de test et s'arrête")
+    ap.add_argument("--pagasa", action="store_true", help="affiche les signaux PAGASA lus et s'arrête (diagnostic)")
     args = ap.parse_args(argv)
 
     cfg = load_config(args.config)
+    if args.pagasa:
+        signals = fetch_pagasa(cfg["pagasa_url"])
+        for level, seg in signals:
+            print(f"--- Signal n° {level}\n{seg}\n")
+        print("Aucun signal trouvé sur la page." if not signals else "")
+        for loc in cfg["emplacements"]:
+            if loc.get("province"):
+                hit = pagasa_signal_for(signals, loc["province"])
+                print(f"{loc['nom']} ({loc['province']}) : " + (f"signal n° {hit[0]} — {hit[1]}" if hit else "aucun signal"))
+        return 0
     notifier = DryRun() if args.dry_run else Ntfy(cfg["ntfy_server"], cfg["ntfy_topic"])
     if args.test:
         notifier.send("Test", "Si vous lisez ceci, les notifications fonctionnent.", P_NORMAL, ["tada"])

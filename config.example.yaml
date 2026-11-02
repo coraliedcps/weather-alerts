@@ -11,11 +11,15 @@ emplacements:
     lon: 123.12
     seuil_rafales_kts: 35     # alerte si rafales prévues >= ce seuil
     rayon_cyclone_km: 500     # alerte si un cyclone passe à moins de X km
+    province: "Negros Oriental"   # signaux PAGASA (orthographe des bulletins, en anglais)
+    seuil_signal_pagasa: 1        # alerte dès le signal n° 1
   - nom: "Dumaguete"
     lat: 9.31
     lon: 123.31
     seuil_rafales_kts: 35
     rayon_cyclone_km: 500
+    province: "Negros Oriental"
+    seuil_signal_pagasa: 1
 
 # --- Réglages facultatifs (valeurs par défaut) ---
 # horizon_heures: 120          # 5 jours de prévision

@@ -6,6 +6,7 @@ Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, en
 
 - **Vent** : alerte si les rafales prévues dans les **5 prochains jours** atteignent ou dépassent le seuil de l'emplacement (35 kts par défaut). Source : Open-Meteo.
 - **Cyclones** : alerte si un cyclone actif, ou sa trajectoire prévue, passe à moins de `rayon_cyclone_km`. Source : GDACS.
+- **Signaux PAGASA** : alerte quand un signal officiel d'alerte vent (TCWS n° 1 à 5) est en vigueur sur la province de l'emplacement. Source : page des bulletins cycloniques de PAGASA.
 - **Anti-spam** : une alerte n'est envoyée qu'une fois. Nouvelle notification seulement si ça s'aggrave (rafales +5 kts, cyclone 50 km plus près, catégorie supérieure, passage en urgence) ou si l'alerte se termine.
 - **Contrôle quotidien** : une notification discrète « Surveillance OK — RAS » par jour (8 h, heure de Manille). Si elle n'arrive pas, le système est en panne.
 - **Panne de source** : si une source de données est injoignable pendant ~3 h, vous êtes prévenue.
@@ -15,6 +16,8 @@ Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, en
 | Rafales ≥ seuil | Haute |
 | Cyclone dans le rayon | Haute |
 | Cyclone à moins de 200 km | Urgente (sonne même en silencieux) |
+| Signal PAGASA n° 1 ou 2 | Haute |
+| Signal PAGASA n° 3, 4 ou 5 | Urgente |
 | Fin d'alerte, source en panne | Normale |
 | Contrôle quotidien | Basse |
 
@@ -35,7 +38,8 @@ Alertes **vent (rafales)** et **cyclones** pour un ou plusieurs emplacements, en
 ### 3. Configurer
 
 1. Copiez `config.example.yaml` en **`config.yaml`**.
-2. Mettez votre nom de canal dans `ntfy_topic` et vos emplacements (nom, lat, lon, seuil, rayon).
+2. Mettez votre nom de canal dans `ntfy_topic` et vos emplacements (nom, lat, lon, seuil, rayon, province).
+   - `province` : nom de la province tel qu'écrit dans les bulletins PAGASA, en anglais (ex. `"Negros Oriental"`). Sans ce champ, pas de suivi PAGASA pour l'emplacement.
    - Variante plus discrète : laissez `CHANGEZ-MOI` dans le fichier et créez un secret `NTFY_TOPIC` (Settings → Secrets and variables → Actions → New repository secret). Le secret prend le dessus.
 3. Ajouter un emplacement = ajouter 5 lignes au fichier.
 
@@ -47,6 +51,7 @@ Sur votre ordinateur (Python 3.10+) :
 pip install -r requirements.txt
 python weather_alerts.py --test       # doit faire sonner votre téléphone
 python weather_alerts.py --dry-run    # affiche ce qui serait envoyé, sans rien envoyer
+python weather_alerts.py --pagasa     # affiche les signaux PAGASA lus sur la page (diagnostic)
 ```
 
 ### 5. Activer sur GitHub
@@ -64,15 +69,19 @@ Ensuite tout est automatique.
 - **Dépôt inactif** : GitHub désactive les tâches planifiées après 60 jours sans activité. Le contrôle quotidien modifie `state.json` chaque jour, ce qui crée un commit et garde le dépôt actif.
 - **Minutes gratuites** : ~24 passages/jour ≈ 750 min/mois, sous les 2 000 du plan gratuit (dépôt privé).
 - **Cyclones (GDACS)** : GDACS ne liste que les systèmes jugés significatifs ; une toute petite dépression peut manquer. Le format de sa trajectoire n'a pas pu être vérifié en direct lors de l'écriture (réseau bloqué) : au premier passage, regardez les journaux du job et lancez `--dry-run` quand un cyclone est actif pour confirmer que la distance affichée est cohérente.
+- **Signaux PAGASA** : PAGASA ne fournit pas de données structurées ; le script lit la page web des bulletins et y cherche « Wind Signal No. X » suivi des provinces. Points à connaître :
+  - Si un signal ne couvre qu'**une partie** de la province, vous êtes quand même alertée (prudence) ; la notification cite l'extrait du bulletin (« northern portion of Negros Oriental (Guihulngan City…) ») pour que vous jugiez.
+  - Une baisse de signal n'est pas notifiée ; une hausse ou la levée complète l'est.
+  - Ce lecteur n'a pas pu être testé sur la vraie page (réseau bloqué lors de l'écriture). Lors du prochain cyclone, lancez `python weather_alerts.py --pagasa` et comparez avec le site de PAGASA. Si la page devient illisible (format changé, site en panne), vous recevez « Surveillance dégradée » après ~3 h.
 - **Rafales** : Open-Meteo donne la rafale maximale de chaque heure ; les rafales locales réelles (effet de côte, de relief) peuvent dépasser la prévision.
 
 ## Réglages facultatifs
 
 Voir le bas de `config.example.yaml` (horizon, rayon d'urgence, heure du contrôle quotidien, seuils d'aggravation).
 
-## Version 2 (hors MVP)
+## Plus tard
 
-Signaux PAGASA par province, seuil sur le vent moyen, petite page web pour éditer les emplacements.
+Seuil sur le vent moyen, petite page web pour éditer les emplacements.
 
 ## Développement
 
